@@ -4,82 +4,106 @@ import json
 import time
 import requests
 import websocket._core as websocket
+import threading
 from keep_alive import keep_alive
 
-status = "dnd" #online/dnd/idle
-
-GUILD_ID = 1400099069111832716
-CHANNEL_ID = 1407074952934330368
+status = "dnd"  # online/dnd/idle
+GUILD_ID = 1369197776596111440
+CHANNEL_ID = 1414503603867222056
 SELF_MUTE = False
 SELF_DEAF = False
 
-usertoken = os.getenv("TOKEN")
-if not usertoken:
-  print("[ERROR] Please add a token inside Secrets.")
-  sys.exit()
+# Load tokens from tokens.txt
+if not os.path.exists("tokens.txt"):
+    print("[ERROR] tokens.txt file not found.")
+    sys.exit()
 
-headers = {"Authorization": usertoken, "Content-Type": "application/json"}
+with open("tokens.txt", "r") as f:
+    tokens = [line.strip() for line in f if line.strip()]
 
-validate = requests.get('https://canary.discordapp.com/api/v9/users/@me', headers=headers)
-if validate.status_code != 200:
-  print("[ERROR] Your token might be invalid. Please check it again.")
-  sys.exit()
+if not tokens:
+    print("[ERROR] No tokens found in tokens.txt.")
+    sys.exit()
 
-userinfo = requests.get('https://canary.discordapp.com/api/v9/users/@me', headers=headers).json()
-username = userinfo["username"]
-discriminator = userinfo["discriminator"]
-userid = userinfo["id"]
+
+def validate_token(token):
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+    r = requests.get('https://discord.com/api/v10/users/@me', headers=headers)
+    if r.status_code == 200:
+        return r.json()
+    return None
+
 
 def joiner(token, status):
-    ws = websocket.create_connection('wss://gateway.discord.gg/?v=9&encoding=json')
-    start = json.loads(ws.recv())
-    heartbeat_interval = start['d']['heartbeat_interval'] / 1000
-    
-    # Send authentication
-    auth = {"op": 2,"d": {"token": token,"properties": {"$os": "Windows 10","$browser": "Google Chrome","$device": "Windows"},"presence": {"status": status,"afk": False}},"s": None,"t": None}
-    ws.send(json.dumps(auth))
-    
-    # Wait for READY event
-    while True:
-        msg = json.loads(ws.recv())
-        if msg['t'] == 'READY':
-            break
-    
-    # Join voice channel
-    vc = {"op": 4,"d": {"guild_id": GUILD_ID,"channel_id": CHANNEL_ID,"self_mute": SELF_MUTE,"self_deaf": SELF_DEAF}}
-    ws.send(json.dumps(vc))
-    
-    # Maintain connection with heartbeats
-    last_heartbeat = time.time()
-    while True:
-        try:
-            # Check if we need to send heartbeat
+    try:
+        ws = websocket.create_connection('wss://gateway.discord.gg/?v=10&encoding=json')
+        start = json.loads(ws.recv())
+        heartbeat_interval = start['d']['heartbeat_interval'] / 1000
+
+        # Authenticate
+        auth = {
+            "op": 2,
+            "d": {
+                "token": token,
+                "properties": {"$os": "Windows 10", "$browser": "Google Chrome", "$device": "Windows"},
+                "presence": {"status": status, "afk": False}
+            },
+            "s": None,
+            "t": None
+        }
+        ws.send(json.dumps(auth))
+
+        # Wait for READY
+        while True:
+            msg = json.loads(ws.recv())
+            if msg.get('t') == 'READY':
+                break
+
+        # Join VC
+        vc = {"op": 4, "d": {"guild_id": GUILD_ID, "channel_id": CHANNEL_ID, "self_mute": SELF_MUTE, "self_deaf": SELF_DEAF}}
+        ws.send(json.dumps(vc))
+
+        last_heartbeat = time.time()
+        while True:
             if time.time() - last_heartbeat >= heartbeat_interval:
-                ws.send(json.dumps({"op": 1,"d": None}))
+                ws.send(json.dumps({"op": 1, "d": None}))
                 last_heartbeat = time.time()
-            
-            # Check for incoming messages (non-blocking)
+
             ws.settimeout(0.1)
             try:
                 msg = ws.recv()
                 data = json.loads(msg)
-                if data['op'] == 11:  # Heartbeat ACK
+                if data.get('op') == 11:  # Heartbeat ACK
                     print("Heartbeat acknowledged")
             except:
-                pass  # Timeout is expected
-                
-            time.sleep(0.1)
-        except Exception as e:
-            print(f"Connection error: {e}")
-            break
-    
-    ws.close()
+                pass
 
-def run_joiner():
-  os.system("clear")
-  print(f"Logged in as {username}#{discriminator} ({userid}).")
-  print("Connecting to voice channel...")
-  joiner(usertoken, status)
+            time.sleep(0.1)
+
+    except Exception as e:
+        print(f"Connection error: {e}")
+    finally:
+        ws.close()
+
+
+def run_all_tokens():
+    os.system("cls" if os.name == "nt" else "clear")
+    threads = []
+
+    for token in tokens:
+        userinfo = validate_token(token)
+        if userinfo:
+            print(f"Logged in as {userinfo['username']}#{userinfo['discriminator']} ({userinfo['id']})")
+            t = threading.Thread(target=joiner, args=(token, status))
+            t.start()
+            threads.append(t)
+        else:
+            print(f"[ERROR] Invalid token: {token}")
+
+    # Optional: wait for all threads (they never actually finish unless connection drops)
+    for t in threads:
+        t.join()
+
 
 keep_alive()
-run_joiner()
+run_all_tokens()
