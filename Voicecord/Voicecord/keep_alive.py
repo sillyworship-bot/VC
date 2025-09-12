@@ -1,24 +1,17 @@
-from flask import Flask, Response
+# keep_alive.py
+from flask import Flask
 from threading import Thread
 
 app = Flask('')
 
 @app.route('/')
-def main():
-    return 'rao sahab'
-
-# Add this route for robots.txt
-@app.route('/robots.txt')
-def robots_txt():
-    content = """
-    User-agent: *
-    Disallow:
-    """
-    return Response(content, mimetype="text/plain")
+def home():
+    return "I’m alive!"
 
 def run():
     app.run(host="0.0.0.0", port=8080)
 
 def keep_alive():
-    server = Thread(target=run)
-    server.start()
+    t = Thread(target=run)
+    t.start()
+
